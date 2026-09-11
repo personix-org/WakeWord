@@ -12,4 +12,18 @@ public interface IAudioSource
     /// file that has been read to the end — which stops the listener.
     /// </summary>
     ValueTask<bool> ReadFrameAsync(Memory<short> frame, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The listener was paused and will not read until <see cref="Resume"/>. A source over a
+    /// microphone should close it here, so another application can have it meanwhile. Sources
+    /// that hold nothing need not override this.
+    /// </summary>
+    void Pause()
+    {
+    }
+
+    /// <summary>The listener is about to read again after <see cref="Pause"/>.</summary>
+    void Resume()
+    {
+    }
 }

@@ -12,6 +12,11 @@ namespace Personix.WakeWord;
 ///
 /// A handler that throws is logged and does not stop the listener. A source that throws does —
 /// recovering a lost microphone is the source's business, since only it knows how.
+///
+/// <see cref="Pause"/> and <see cref="Resume"/> may be called from any thread — a control
+/// endpoint, a hotkey, another service. While paused the listener reads nothing and the source
+/// is told to let the microphone go; on resume the detector starts from a clean window, so audio
+/// from before the pause cannot combine with audio after it.
 /// </summary>
 public sealed class WakeWordListener(
     IAudioSource audio,
@@ -21,6 +26,54 @@ public sealed class WakeWordListener(
 {
     private static readonly TimeSpan FrameDuration =
         TimeSpan.FromSeconds((double)WakeWordDetector.FrameLength / Melspectrogram.SampleRate);
+
+    private readonly Lock _gate = new();
+    private TaskCompletionSource? _resumed;   // set while paused; completing it resumes the loop
+    private volatile ListenerState _state = ListenerState.Stopped;
+
+    /// <summary>What the listener is doing right now. Safe to read from any thread.</summary>
+    public ListenerState State => _state;
+
+    /// <summary>
+    /// Stops reading until <see cref="Resume"/>. The source is told to let the microphone go.
+    /// Calling it while already paused, or before the listener runs, does nothing.
+    /// </summary>
+    public void Pause()
+    {
+        lock (_gate)
+        {
+            if (_resumed is not null)
+            {
+                return;
+            }
+
+            _resumed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        audio.Pause();
+        logger.LogInformation("Paused");
+    }
+
+    /// <summary>Starts reading again after <see cref="Pause"/>. Does nothing if not paused.</summary>
+    public void Resume()
+    {
+        TaskCompletionSource resumed;
+
+        lock (_gate)
+        {
+            if (_resumed is null)
+            {
+                return;
+            }
+
+            resumed = _resumed;
+            _resumed = null;
+        }
+
+        audio.Resume();
+        logger.LogInformation("Resumed");
+        resumed.SetResult();
+    }
 
     /// <summary>
     /// Listens until the source ends or the token is cancelled. This is what the hosted service
@@ -45,11 +98,24 @@ public sealed class WakeWordListener(
         var frame = new short[WakeWordDetector.FrameLength];
         var frames = 0L;
         var quietUntil = TimeSpan.Zero;
+        _state = ListenerState.Listening;
 
         try
         {
-            while (await audio.ReadFrameAsync(frame, cancellationToken).ConfigureAwait(false))
+            while (true)
             {
+                if (await WaitIfPausedAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    // Whatever was in the detector's window is from before the pause.
+                    detector.Reset();
+                    quietUntil = TimeSpan.Zero;
+                }
+
+                if (!await audio.ReadFrameAsync(frame, cancellationToken).ConfigureAwait(false))
+                {
+                    break;
+                }
+
                 var at = frames * FrameDuration;
                 frames++;
 
@@ -74,6 +140,31 @@ public sealed class WakeWordListener(
         {
             logger.LogInformation("Listener stopped after {Frames} frames", frames);
         }
+        finally
+        {
+            _state = ListenerState.Stopped;
+        }
+    }
+
+    /// <summary>Blocks while paused. Returns true if it did wait, so the caller can start afresh.</summary>
+    private async Task<bool> WaitIfPausedAsync(CancellationToken cancellationToken)
+    {
+        Task? resumed;
+
+        lock (_gate)
+        {
+            resumed = _resumed?.Task;
+        }
+
+        if (resumed is null)
+        {
+            return false;
+        }
+
+        _state = ListenerState.Paused;
+        await resumed.WaitAsync(cancellationToken).ConfigureAwait(false);
+        _state = ListenerState.Listening;
+        return true;
     }
 
     /// <inheritdoc />

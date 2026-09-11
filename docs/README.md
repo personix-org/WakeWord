@@ -92,6 +92,22 @@ Audio capture is left to the host: the detector takes frames of 16 kHz mono PCM.
 into a single detection. A word that fires on similar-sounding speech wants a higher threshold
 than the 0.5 the library suggests.
 
+### Pausing from outside
+
+`WakeWordListener.Pause()` stops reading and tells the audio source to let the microphone go —
+for as long as another application needs it. `Resume()` starts again from a clean window, and
+`State` says which it is. Both are safe to call from any thread, so a control endpoint or a
+hotkey can drive them:
+
+```csharp
+app.MapPost("/pause", (WakeWordListener listener) => { listener.Pause(); return listener.State; });
+app.MapPost("/resume", (WakeWordListener listener) => { listener.Resume(); return listener.State; });
+app.MapGet("/state", (WakeWordListener listener) => listener.State);
+```
+
+A source over a microphone overrides `IAudioSource.Pause` to close the device and `Resume` to
+reopen it; a source over a file has nothing to release and can leave both alone.
+
 ### Without a host
 
 `WakeWordListener.RunAsync` is public, so a console application can drive it without hosting:
