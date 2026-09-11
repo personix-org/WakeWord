@@ -14,9 +14,11 @@ namespace Personix.WakeWord;
 /// recovering a lost microphone is the source's business, since only it knows how.
 ///
 /// <see cref="Pause"/> and <see cref="Resume"/> may be called from any thread — a control
-/// endpoint, a hotkey, another service. While paused the listener reads nothing and the source
-/// is told to let the microphone go; on resume the detector starts from a clean window, so audio
-/// from before the pause cannot combine with audio after it.
+/// endpoint, a hotkey, another service. They record the request; the listening loop acts on it
+/// between two frames, so the source is paused and resumed by the same thread that reads from
+/// it, never while a read is under way. While paused nothing is read and the source has been told
+/// to let the microphone go; on resume the detector starts from a clean window, so audio from
+/// before the pause cannot combine with audio after it.
 /// </summary>
 public sealed class WakeWordListener(
     IAudioSource audio,
@@ -28,30 +30,38 @@ public sealed class WakeWordListener(
         TimeSpan.FromSeconds((double)WakeWordDetector.FrameLength / Melspectrogram.SampleRate);
 
     private readonly Lock _gate = new();
-    private TaskCompletionSource? _resumed;   // set while paused; completing it resumes the loop
-    private volatile ListenerState _state = ListenerState.Stopped;
-
-    /// <summary>What the listener is doing right now. Safe to read from any thread.</summary>
-    public ListenerState State => _state;
+    private TaskCompletionSource? _resumed;   // set while a pause is requested; completing it resumes the loop
+    private volatile bool _running;
+    private volatile bool _paused;
 
     /// <summary>
-    /// Stops reading until <see cref="Resume"/>. The source is told to let the microphone go.
-    /// Calling it while already paused, or before the listener runs, does nothing.
+    /// What the listener is doing. Reflects the last request: right after <see cref="Pause"/> it is
+    /// <see cref="ListenerState.Paused"/> even though the loop takes up to one frame to act on it.
+    /// Safe to read from any thread.
+    /// </summary>
+    public ListenerState State =>
+        !_running ? ListenerState.Stopped
+        : _paused ? ListenerState.Paused
+        : ListenerState.Listening;
+
+    /// <summary>
+    /// Stops reading until <see cref="Resume"/>. The loop finishes the frame in hand, tells the
+    /// source to let the microphone go and waits. Calling it while already paused does nothing.
     /// </summary>
     public void Pause()
     {
         lock (_gate)
         {
-            if (_resumed is not null)
+            if (_paused)
             {
                 return;
             }
 
+            _paused = true;
             _resumed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
-        audio.Pause();
-        logger.LogInformation("Paused");
+        logger.LogInformation("Pause requested");
     }
 
     /// <summary>Starts reading again after <see cref="Pause"/>. Does nothing if not paused.</summary>
@@ -61,17 +71,17 @@ public sealed class WakeWordListener(
 
         lock (_gate)
         {
-            if (_resumed is null)
+            if (!_paused)
             {
                 return;
             }
 
-            resumed = _resumed;
+            _paused = false;
+            resumed = _resumed!;
             _resumed = null;
         }
 
-        audio.Resume();
-        logger.LogInformation("Resumed");
+        logger.LogInformation("Resume requested");
         resumed.SetResult();
     }
 
@@ -98,7 +108,7 @@ public sealed class WakeWordListener(
         var frame = new short[WakeWordDetector.FrameLength];
         var frames = 0L;
         var quietUntil = TimeSpan.Zero;
-        _state = ListenerState.Listening;
+        _running = true;
 
         try
         {
@@ -142,11 +152,22 @@ public sealed class WakeWordListener(
         }
         finally
         {
-            _state = ListenerState.Stopped;
+            _running = false;
+
+            // A pause left pending would wait for a resume that no longer means anything.
+            lock (_gate)
+            {
+                _paused = false;
+                _resumed?.TrySetResult();
+                _resumed = null;
+            }
         }
     }
 
-    /// <summary>Blocks while paused. Returns true if it did wait, so the caller can start afresh.</summary>
+    /// <summary>
+    /// Honours a pending pause: releases the source, waits for the resume, takes the source back.
+    /// Returns true if it did wait, so the caller can start afresh.
+    /// </summary>
     private async Task<bool> WaitIfPausedAsync(CancellationToken cancellationToken)
     {
         Task? resumed;
@@ -161,9 +182,19 @@ public sealed class WakeWordListener(
             return false;
         }
 
-        _state = ListenerState.Paused;
-        await resumed.WaitAsync(cancellationToken).ConfigureAwait(false);
-        _state = ListenerState.Listening;
+        audio.Pause();
+        logger.LogInformation("Paused — audio source released");
+
+        try
+        {
+            await resumed.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            audio.Resume();
+        }
+
+        logger.LogInformation("Resumed");
         return true;
     }
 

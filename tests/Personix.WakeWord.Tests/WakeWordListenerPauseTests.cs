@@ -66,7 +66,7 @@ public class WakeWordListenerPauseTests
     }
 
     [Fact]
-    public void Pausing_twice_and_resuming_when_not_paused_are_harmless()
+    public void Pausing_and_resuming_a_listener_that_is_not_running_touches_nothing()
     {
         // Arrange
         var audio = new FrameSource([]);
@@ -78,10 +78,34 @@ public class WakeWordListenerPauseTests
         listener.Resume();
         listener.Resume();
 
-        // Assert — the source heard each transition once
-        audio.PauseCalls.ShouldBe(1);
-        audio.ResumeCalls.ShouldBe(1);
+        // Assert — only the loop talks to the source, and there is no loop
+        audio.PauseCalls.ShouldBe(0);
+        audio.ResumeCalls.ShouldBe(0);
         listener.State.ShouldBe(ListenerState.Stopped, "it never ran");
+    }
+
+    [SkippableFact]
+    public async Task State_answers_the_request_before_the_loop_catches_up()
+    {
+        // Arrange — a control endpoint answers right after Pause() or Resume(); the loop acts on
+        // it up to one frame later, and the answer has to be right already
+        var (audio, options) = Rumburaku();
+        var listener = Build(audio, options);
+        audio.PauseListenerAfterFrames = 5;
+        audio.Listener = listener;
+
+        // Act
+        using var cancellation = new CancellationTokenSource();
+        var run = listener.RunAsync(cancellation.Token);
+        await audio.PausedSignal.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var whilePaused = listener.State;
+        listener.Resume();
+        var rightAfterResume = listener.State;
+        await run;
+
+        // Assert
+        whilePaused.ShouldBe(ListenerState.Paused);
+        rightAfterResume.ShouldBe(ListenerState.Listening);
     }
 
     private static (FrameSource Source, WakeWordOptions Options) Rumburaku()
