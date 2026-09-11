@@ -1,62 +1,57 @@
 using System.Globalization;
 
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
 using Personix.WakeWord;
 using Personix.WakeWord.Sample;
 
-// Runs the detector over a recording and reports every wake word it hears.
+// Listens for wake words in a recording and prints every one it hears.
 //
-//   dotnet run -- <model-directory> <recording.wav> <model>[:threshold] [<model>[:threshold] …]
+//   dotnet run -- <recording.wav> <model>[:threshold] [<model>[:threshold] …]
 //
-// The model directory is the one holding melspectrogram.onnx and embedding_model.onnx. Those two
-// are shared by every wake word; each further model is one small classifier on top of them.
+// The recording is 16 kHz mono WAV. Each model is one classifier, .wwc or .onnx; the shared
+// embedding model comes with the package and is found next to the binaries.
 //
-// Both models and audio come from outside the library: the package ships code, not weights, and
-// capture is the host's business. Here the audio is a 16 kHz mono WAV.
+// This is the same wiring a real application uses — AddWakeWord, an audio source, a handler —
+// only the audio source reads a file instead of a microphone, so the listener ends with it.
 
-if (args.Length < 3)
+if (args.Length < 2)
 {
     Console.Error.WriteLine(
         """
-        usage: wakeword-sample <model-directory> <recording.wav> <model>[:threshold] …
+        usage: wakeword-sample <recording.wav> <model>[:threshold] …
 
-          model-directory   holds melspectrogram.onnx and embedding_model.onnx
           recording.wav     16 kHz mono, 16-bit PCM
           model             a .onnx or .wwc classifier, with an optional threshold (default 0.5)
 
         example:
-          wakeword-sample ./models ./hello.wav ./models/hey_jarvis_v0.1.onnx:0.5
+          wakeword-sample ./hello.wav ./models/my-word.wwc:0.9
         """);
     return 1;
 }
 
-var modelDirectory = args[0];
-var recording = args[1];
+var recording = args[0];
 
-var paths = new List<string>();
-var thresholds = new List<float>();
+var services = new ServiceCollection();
+services.AddLogging(logging => logging.AddSimpleConsole(console => console.SingleLine = true).SetMinimumLevel(LogLevel.Information));
 
-foreach (var argument in args.Skip(2))
-{
-    var separator = argument.LastIndexOf(':');
-
-    // A Windows drive letter also carries a colon, so only a parsable tail counts as a threshold.
-    if (separator > 1
-        && float.TryParse(argument[(separator + 1)..], NumberStyles.Float, CultureInfo.InvariantCulture, out var threshold))
+services.AddWakeWord(words =>
     {
-        paths.Add(argument[..separator]);
-        thresholds.Add(threshold);
-    }
-    else
-    {
-        paths.Add(argument);
-        thresholds.Add(0.5f);
-    }
-}
+        foreach (var argument in args.Skip(1))
+        {
+            var (path, threshold) = Parse(argument);
+            words.Add(Path.GetFileNameWithoutExtension(path), path, threshold);
+        }
+    })
+    .AddAudioSource(_ => new WavFileAudioSource(recording))
+    .AddHandler<PrintDetection>();
 
-short[] samples;
+await using var provider = services.BuildServiceProvider();
+
 try
 {
-    samples = WavFile.Read(recording);
+    await provider.GetRequiredService<WakeWordListener>().RunAsync(CancellationToken.None);
 }
 catch (Exception e) when (e is IOException or InvalidDataException)
 {
@@ -64,44 +59,15 @@ catch (Exception e) when (e is IOException or InvalidDataException)
     return 1;
 }
 
-using var detector = new WakeWordDetector(modelDirectory, paths, thresholds);
-
-var names = paths.Select(Path.GetFileNameWithoutExtension).ToArray();
-Console.WriteLine($"{recording}: {samples.Length / (double)WavFile.SampleRate:F1} s, "
-    + $"listening for {string.Join(", ", names)}");
-
-var detections = 0;
-var frames = 0;
-var peaks = new float[paths.Count];
-
-for (var offset = 0; offset + WakeWordDetector.FrameLength <= samples.Length;
-     offset += WakeWordDetector.FrameLength)
-{
-    var hit = detector.Process(samples.AsSpan(offset, WakeWordDetector.FrameLength));
-    frames++;
-
-    for (var i = 0; i < peaks.Length; i++)
-    {
-        peaks[i] = Math.Max(peaks[i], detector.LastScores[i]);
-    }
-
-    if (hit < 0)
-    {
-        continue;
-    }
-
-    detections++;
-    var at = offset / (double)WavFile.SampleRate;
-    Console.WriteLine($"  {at,6:F2} s  {names[hit]}  (score {detector.LastScores[hit]:F4})");
-}
-
-Console.WriteLine($"{frames} frames, {detections} detection(s)");
-
-// Peak scores make it obvious whether a miss was close or nowhere near, which is what a threshold
-// is tuned against.
-for (var i = 0; i < peaks.Length; i++)
-{
-    Console.WriteLine($"  highest score for {names[i]}: {peaks[i]:F4} (threshold {thresholds[i]:F2})");
-}
-
 return 0;
+
+// "path:0.9" — a Windows drive letter also carries a colon, so only a parsable tail counts.
+static (string Path, float Threshold) Parse(string argument)
+{
+    var separator = argument.LastIndexOf(':');
+
+    return separator > 1
+        && float.TryParse(argument[(separator + 1)..], NumberStyles.Float, CultureInfo.InvariantCulture, out var threshold)
+        ? (argument[..separator], threshold)
+        : (argument, 0.5f);
+}

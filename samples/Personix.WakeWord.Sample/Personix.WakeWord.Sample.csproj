@@ -13,6 +13,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+  <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
+  <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
   <ProjectReference Include="..\..\src\Personix.WakeWord\Personix.WakeWord.csproj" />
   </ItemGroup>
 

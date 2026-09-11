@@ -23,6 +23,8 @@
   <PackageReference Include="Shouldly" Version="4.3.0" />
   <!-- The chain tests need the shared models, which are not in the repository. -->
   <PackageReference Include="Xunit.SkippableFact" Version="1.5.23" />
+  <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
+  <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.1" />
   </ItemGroup>
 
   <ItemGroup>

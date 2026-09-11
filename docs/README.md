@@ -17,7 +17,12 @@ Audio capture is left to the host: the detector takes frames of 16 kHz mono PCM.
 
 | Type | What it does |
 |---|---|
-| `WakeWordDetector` | The whole chain behind one call. Feed it frames, it says which word fired. |
+| `AddWakeWord(…)` | Registers the listener as a hosted service — the way an application uses this. |
+| `IAudioSource` | Where frames come from. The host implements it over its microphone library. |
+| `IWakeWordHandler` | What happens when a word is heard. Scoped, async, as many as you like. |
+| `WakeWordOptions` | Which words, from where, with what threshold; the cooldown after a detection. |
+| `WakeWordListener` | The hosted service: source → detector → handlers. |
+| `WakeWordDetector` | The chain behind one synchronous call, for hosts with their own audio loop. |
 | `WakeWordFeatures` | The shared half — audio to windows of speech embeddings. |
 | `Melspectrogram` | The log-mel front end, as code. |
 | `IWakeWordClassifier` | The trained head that scores one window. |
@@ -36,33 +41,79 @@ Audio capture is left to the host: the detector takes frames of 16 kHz mono PCM.
    ones from openWakeWord (see [Models and licensing](#models-and-licensing) for their terms).
    The shared embedding model comes with the package.
 
-3. Feed the detector consecutive frames.
+3. Register the listener, give it an audio source and say what should happen.
 
    ```csharp
    using Personix.WakeWord;
 
-   using var detector = new WakeWordDetector(
-       modelDirectory: null,                       // the model the package installed
-       wakeWordModelPaths: ["my-word.wwc"],
-       thresholds: [0.9f]);
+   services.AddWakeWord(words => words
+           .Add("my-word", "my-word.wwc", threshold: 0.9f))
+       .AddAudioSource<MicrophoneSource>()
+       .AddHandler<StartVoicePipeline>();
+   ```
 
-   while (recorder.TryReadFrame(out short[] frame))   // 1280 samples, 16 kHz mono
+   The audio source is yours — the package has no opinion on how audio is captured:
+
+   ```csharp
+   sealed class MicrophoneSource(IMicrophone microphone) : IAudioSource
    {
-       var hit = detector.Process(frame);
-
-       if (hit >= 0)
-       {
-           Console.WriteLine($"heard word {hit}, score {detector.LastScores[hit]:F3}");
-       }
+       // Fill the frame with the next 1280 samples of 16 kHz mono PCM; false ends the listener.
+       public ValueTask<bool> ReadFrameAsync(Memory<short> frame, CancellationToken ct)
+           => microphone.ReadAsync(frame, ct);
    }
    ```
 
-`Process` returns the index of the word that fired, or -1 for none. For roughly the first 1.3
-seconds it always returns -1, while the classifier window fills.
+   Handlers are scoped services, so they can take whatever the detection needs:
 
-`LastScores` holds the score of every model from the last frame, which is what a threshold is
-tuned against — a word that fires on similar-sounding speech wants a higher one than the 0.5 the
-library suggests.
+   ```csharp
+   sealed class StartVoicePipeline(IHttpClientFactory http) : IWakeWordHandler
+   {
+       public Task HandleAsync(WakeWordDetection detection, CancellationToken ct)
+           => http.CreateClient("pipeline").PostAsJsonAsync("/voice/start", detection, ct);
+   }
+   ```
+
+   A `WakeWordDetection` carries the word's name and index, the score, and its position in
+   the stream. Handlers run in registration order; one that throws is logged and skipped.
+
+`WakeWordOptions.Cooldown` (800 ms by default) folds the several frames one utterance fires on
+into a single detection. A word that fires on similar-sounding speech wants a higher threshold
+than the 0.5 the library suggests.
+
+### Without a host
+
+`WakeWordListener.RunAsync` is public, so a console application can drive it without hosting:
+
+```csharp
+await using var provider = services.BuildServiceProvider();
+await provider.GetRequiredService<WakeWordListener>().RunAsync(cancellationToken);
+```
+
+### Your own audio loop
+
+`WakeWordDetector` is the chain behind a single synchronous call, for a host that already has
+one. It allocates nothing per frame and has no opinion on threads.
+
+```csharp
+using var detector = new WakeWordDetector(
+    modelDirectory: null,                       // the model the package installed
+    wakeWordModelPaths: ["my-word.wwc"],
+    thresholds: [0.9f]);
+
+while (recorder.TryReadFrame(out short[] frame))   // 1280 samples, 16 kHz mono
+{
+    var hit = detector.Process(frame);
+
+    if (hit >= 0)
+    {
+        Console.WriteLine($"heard word {hit}, score {detector.LastScores[hit]:F3}");
+    }
+}
+```
+
+`Process` returns the index of the word that fired, or -1 for none. For roughly the first 1.3
+seconds it always returns -1, while the classifier window fills. `LastScores` holds every
+model's score from the last frame, which is what a threshold is tuned against.
 
 ### Several words at once
 
@@ -70,13 +121,13 @@ The expensive part of the chain runs once per frame regardless of how many words
 Each further word is one pass over a small network:
 
 ```csharp
-using var detector = new WakeWordDetector(
-    null,
-    ["hey_jarvis_v0.1.onnx", "alexa_v0.1.onnx", "my-word.wwc"],
-    [0.5f, 0.5f, 0.9f]);
+services.AddWakeWord(words => words
+    .Add("jarvis", "hey_jarvis_v0.1.onnx")
+    .Add("alexa", "alexa_v0.1.onnx")
+    .Add("mine", "my-word.wwc", threshold: 0.9f));
 ```
 
-The index returned by `Process` says which one it was, in the order the models were given.
+The detection names the word and carries its index, in the order the words were added.
 
 ### Threading
 
@@ -115,7 +166,7 @@ write one without leaving .NET, since TorchSharp cannot export to ONNX.
 src/Personix.WakeWord/            the library, with build/Personix.WakeWord.targets that ships the model
 models/                           embedding_b0…b5.onnx (Apache-2.0, see NOTICE)
 tests/Personix.WakeWord.Tests/    unit tests, plus chain tests against reference recordings
-samples/Personix.WakeWord.Sample/ runs the detector over a WAV file
+samples/Personix.WakeWord.Sample/ the DI wiring over a WAV file source, printing detections
 docs/README.md                    this file
 ```
 
