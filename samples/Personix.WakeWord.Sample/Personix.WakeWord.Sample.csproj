@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+  <!-- A sample runs, it does not ship, so one framework is enough. -->
+  <TargetFrameworks>net10.0</TargetFrameworks>
+  <OutputType>Exe</OutputType>
+  <ImplicitUsings>enable</ImplicitUsings>
+  <Nullable>enable</Nullable>
+  <IsPackable>false</IsPackable>
+  <AssemblyName>wakeword-sample</AssemblyName>
+  <RootNamespace>Personix.WakeWord.Sample</RootNamespace>
+  <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+  <ProjectReference Include="..\..\src\Personix.WakeWord\Personix.WakeWord.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,82 @@
+name: release
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # .editorconfig is a symlink into the .codestyle submodule, so without this the checkout
+      # leaves it dangling and the compiler fails with CS2001 before it builds anything.
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      # Both SDKs, because the package multi-targets. The net11.0 leg needs SDK 11 to compile at
+      # all, and once it is in TargetFrameworks even the net10.0 leg refuses to build on SDK 10 —
+      # the SDK has to understand every framework in the list before it builds any of them.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '11.0.x'
+          dotnet-quality: preview
+      - run: dotnet restore
+      - run: dotnet build -c Release --no-restore
+      # One run per framework, and never a bare `dotnet test`. On a multi-targeted test project the
+      # bare form picks a single framework, and if it discovers nothing there it still exits zero —
+      # a green build that tested nothing at all.
+      #
+      # The grep is the guard against that. It matches the passed count rather than a fixed banner:
+      # the summary reads "Passed!" on the default verbosity and "Test Run Successful." on normal,
+      # so keying on either one breaks the moment the verbosity changes.
+      - name: Test net10.0
+        run: |
+          set -o pipefail
+          dotnet test -c Release --no-build -f net10.0 --verbosity normal | tee test-net10.log
+          grep -qE "Passed:[[:space:]]*[1-9]" test-net10.log || { echo "::error::No tests ran for net10.0"; exit 1; }
+      - name: Test net11.0
+        run: |
+          set -o pipefail
+          dotnet test -c Release --no-build -f net11.0 --verbosity normal | tee test-net11.log
+          grep -qE "Passed:[[:space:]]*[1-9]" test-net11.log || { echo "::error::No tests ran for net11.0"; exit 1; }
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # required for NuGet Trusted Publishing (OIDC)
+      contents: read
+    steps:
+      # .editorconfig is a symlink into the .codestyle submodule, so without this the checkout
+      # leaves it dangling and the compiler fails with CS2001 before it builds anything.
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      # Both SDKs, because the package multi-targets. The net11.0 leg needs SDK 11 to compile at
+      # all, and once it is in TargetFrameworks even the net10.0 leg refuses to build on SDK 10 —
+      # the SDK has to understand every framework in the list before it builds any of them.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '11.0.x'
+          dotnet-quality: preview
+      - name: NuGet login (Trusted Publishing)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: personix
+      - name: Derive version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Pack
+        run: dotnet pack src/Personix.WakeWord/Personix.WakeWord.csproj -c Release -p:Version=$VERSION -p:ContinuousIntegrationBuild=true -o artifacts
+      - name: Push to NuGet
+        run: dotnet nuget push "artifacts/*.nupkg" --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate

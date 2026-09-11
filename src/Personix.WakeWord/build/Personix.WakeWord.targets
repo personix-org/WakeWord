@@ -1,0 +1,12 @@
+<Project>
+  <!--
+   The speech embedding model travels with the package as six blocks and lands next to the
+   consumer's binaries under models/, which is where WakeWordDetector looks by default.
+  -->
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)../models/embedding_b*.onnx"
+          Link="models/%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
+  </ItemGroup>
+</Project>

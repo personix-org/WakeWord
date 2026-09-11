@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+  <!--
+   TargetFrameworks comes from Directory.Build.props, deliberately not overridden here. A
+   single TargetFramework in this file would silently win over it and test only one of the
+   two frameworks the package ships.
+  -->
+  <ImplicitUsings>enable</ImplicitUsings>
+  <Nullable>enable</Nullable>
+  <IsPackable>false</IsPackable>
+  <IsTestProject>true</IsTestProject>
+  <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+  <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+  <PackageReference Include="xunit" Version="2.9.3" />
+  <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+   <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+   <PrivateAssets>all</PrivateAssets>
+  </PackageReference>
+  <PackageReference Include="Shouldly" Version="4.3.0" />
+  <!-- The chain tests need the shared models, which are not in the repository. -->
+  <PackageReference Include="Xunit.SkippableFact" Version="1.5.23" />
+  </ItemGroup>
+
+  <ItemGroup>
+  <ProjectReference Include="..\..\src\Personix.WakeWord\Personix.WakeWord.csproj" />
+  </ItemGroup>
+
+</Project>

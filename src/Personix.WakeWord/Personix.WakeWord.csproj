@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+  <IsPackable>true</IsPackable>
+  <PackageId>Personix.WakeWord</PackageId>
+  <AssemblyName>Personix.WakeWord</AssemblyName>
+  <RootNamespace>Personix.WakeWord</RootNamespace>
+  <Product>Personix.WakeWord</Product>
+  <Version>0.1.0</Version>
+  <PackageReleaseNotes>0.1.0 — first release.</PackageReleaseNotes>
+  <Authors>Pavel Kudrna</Authors>
+  <Company>Personix</Company>
+  <Description>On-device wake word detection for .NET. Runs the openWakeWord model chain — melspectrogram, speech embedding, classifier — entirely offline, with no account, no access key and no network call. The first two models are shared, so every additional wake word costs one small classifier rather than a second pipeline. Audio capture is left to the host: the detector takes 16 kHz PCM frames.</Description>
+  <Copyright>Copyright (c) 2026 Personix</Copyright>
+  <PackageLicenseExpression>MIT</PackageLicenseExpression>
+  <PackageProjectUrl>https://github.com/personix-org/WakeWord</PackageProjectUrl>
+  <RepositoryUrl>https://github.com/personix-org/WakeWord</RepositoryUrl>
+  <RepositoryType>git</RepositoryType>
+  <PackageTags>wake-word;keyword-spotting;speech;voice;onnx;openwakeword;offline;on-device</PackageTags>
+  <PublishRepositoryUrl>true</PublishRepositoryUrl>
+  <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  <IncludeSymbols>true</IncludeSymbols>
+  <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  <Deterministic>true</Deterministic>
+  <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+  <None Include="..\..\docs\README.md" Pack="true" PackagePath="\" Visible="false" />
+  <None Include="..\..\LICENSE-embedding_model" Pack="true" PackagePath="\" Visible="false" />
+  <None Include="..\..\NOTICE" Pack="true" PackagePath="\" Visible="false" />
+  <!-- Into the package for consumers, and into this project's output for anything that
+       references it directly — a project reference does not run the packaged targets. -->
+  <None Include="build\Personix.WakeWord.targets" Pack="true" PackagePath="build\" />
+  <None Include="..\..\models\embedding_b*.onnx" Pack="true" PackagePath="models\"
+        Link="models\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+  <InternalsVisibleTo Include="Personix.WakeWord.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+  <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.301" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+  <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.28.0" />
+  </ItemGroup>
+
+</Project>

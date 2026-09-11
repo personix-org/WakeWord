@@ -1,0 +1,24 @@
+Personix.WakeWord
+Copyright (c) 2026 Personix
+
+This package is licensed under the MIT License (see LICENSE).
+
+It bundles one third-party file under a different license:
+
+  models/embedding_b0.onnx … embedding_b5.onnx
+    A speech embedding model published by Google as the TensorFlow Hub module
+    "google/speech_embedding/1", described in:
+
+      James Lin, Kevin Kilgour, Dominik Roblek, Matthew Sharifi.
+      "Training Keyword Spotters with Limited and Synthesized Speech Data", 2020.
+      https://arxiv.org/abs/2002.01322
+
+    Licensed under the Apache License, Version 2.0 (see LICENSE-embedding_model).
+    The ONNX conversion of the module is the one distributed by the openWakeWord
+    project (https://github.com/dscripka/openWakeWord), whose code is likewise
+    Apache-2.0. The WakeWord project split that graph into six sub-graphs at its
+    pooling layers so the model can run incrementally; no weight was changed.
+
+The log-mel front end (Melspectrogram.cs) is an independent implementation of a
+fixed signal-processing transform and is covered by this package's MIT license.
+No pre-trained wake word models from openWakeWord are included.
