@@ -76,6 +76,18 @@ Audio capture is left to the host: the detector takes frames of 16 kHz mono PCM.
    A `WakeWordDetection` carries the word's name and index, the score, and its position in
    the stream. Handlers run in registration order; one that throws is logged and skipped.
 
+   A handler can answer to some words only — the others never reach it:
+
+   ```csharp
+   services.AddWakeWord(words => words
+           .Add("assistant", "assistant.wwc", threshold: 0.9f)
+           .Add("stop", "stop.wwc", threshold: 0.9f))
+       .AddAudioSource<MicrophoneSource>()
+       .AddHandler<StartVoicePipeline>("assistant")
+       .AddHandler<StopEverything>("stop")
+       .AddHandler<LogEveryDetection>();          // no words: all of them
+   ```
+
 `WakeWordOptions.Cooldown` (800 ms by default) folds the several frames one utterance fires on
 into a single detection. A word that fires on similar-sounding speech wants a higher threshold
 than the 0.5 the library suggests.

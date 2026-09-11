@@ -95,7 +95,7 @@ public sealed class WakeWordListener(
             }
             catch (Exception e)
             {
-                logger.LogError(e, "{Handler} failed on {Word}", handler.GetType().Name, detection.Word);
+                logger.LogError(e, "{Handler} failed on {Word}", handler, detection.Word);
             }
         }
     }

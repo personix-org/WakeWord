@@ -67,6 +67,24 @@ public class WakeWordListenerTests
         source.Exhausted.ShouldBeTrue();
     }
 
+    [SkippableFact]
+    public async Task A_handler_limited_to_other_words_stays_quiet()
+    {
+        // Arrange — both handlers are registered, only one answers to rumburaku
+        var (source, options) = Rumburaku();
+        var rumburaku = new List<WakeWordDetection>();
+        var saturnine = new List<WakeWordDetection>();
+
+        // Act
+        await Run(source, options, CancellationToken.None,
+            new WordFilteredHandler(new RecordingHandler(saturnine), new HashSet<string> { "saturnine" }),
+            new WordFilteredHandler(new RecordingHandler(rumburaku), new HashSet<string> { "rumburaku" }));
+
+        // Assert
+        rumburaku.ShouldHaveSingleItem().Word.ShouldBe("rumburaku");
+        saturnine.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task The_listener_ends_when_the_source_does()
     {

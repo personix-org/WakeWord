@@ -28,10 +28,32 @@ public sealed class WakeWordBuilder(IServiceCollection services)
     /// Registers something to run when a word is heard. Handlers are scoped: each detection gets
     /// a fresh scope, so a handler can take scoped services such as a database context.
     /// </summary>
-    public WakeWordBuilder AddHandler<THandler>()
+    /// <param name="words">
+    /// Names of the words this handler answers to, as registered in <see cref="WakeWordOptions"/>.
+    /// None means every word.
+    /// </param>
+    public WakeWordBuilder AddHandler<THandler>(params string[] words)
         where THandler : class, IWakeWordHandler
     {
-        Services.AddScoped<IWakeWordHandler, THandler>();
+        ArgumentNullException.ThrowIfNull(words);
+
+        if (words.Length == 0)
+        {
+            Services.AddScoped<IWakeWordHandler, THandler>();
+            return this;
+        }
+
+        foreach (var word in words)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(word, nameof(words));
+        }
+
+        var accepted = words.ToHashSet(StringComparer.Ordinal);
+
+        Services.AddScoped<THandler>();
+        Services.AddScoped<IWakeWordHandler>(provider =>
+            new WordFilteredHandler(provider.GetRequiredService<THandler>(), accepted));
+
         return this;
     }
 }

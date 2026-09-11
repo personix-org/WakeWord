@@ -54,6 +54,38 @@ public class WakeWordServiceCollectionExtensionsTests
     }
 
     [Fact]
+    public void A_handler_can_be_limited_to_some_words()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddWakeWord(words => words.Add("one", "one.wwc").Add("two", "two.wwc"))
+            .AddAudioSource<SilentSource>()
+            .AddHandler<CountingHandler>("one");
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        // Act
+        var handler = scope.ServiceProvider.GetServices<IWakeWordHandler>().ShouldHaveSingleItem();
+
+        // Assert — wrapped in the filter, and the filter names what was registered
+        handler.ShouldBeOfType<WordFilteredHandler>();
+        handler.ToString().ShouldBe(nameof(CountingHandler));
+        scope.ServiceProvider.GetRequiredService<CountingHandler>().ShouldNotBeNull("the handler itself is resolvable too");
+    }
+
+    [Fact]
+    public void A_blank_word_on_a_handler_is_refused()
+    {
+        var builder = new ServiceCollection().AddWakeWord(words => words.Add("one", "one.wwc"));
+
+        Action add = () => builder.AddHandler<CountingHandler>("one", " ");
+
+        Should.Throw<ArgumentException>(add);
+    }
+
+    [Fact]
     public void A_factory_can_supply_the_audio_source()
     {
         var services = new ServiceCollection();
